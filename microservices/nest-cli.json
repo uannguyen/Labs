@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "apps/wallet/src",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "builder": "tsc",
+    "tsConfigPath": "apps/wallet/tsconfig.app.json"
+  },
+  "monorepo": true,
+  "root": "apps/wallet",
+  "projects": {
+    "notification": {
+      "type": "application",
+      "root": "apps/notification",
+      "entryFile": "main",
+      "sourceRoot": "apps/notification/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/notification/tsconfig.app.json"
+      }
+    },
+    "partner": {
+      "type": "application",
+      "root": "apps/partner",
+      "entryFile": "main",
+      "sourceRoot": "apps/partner/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/partner/tsconfig.app.json"
+      }
+    },
+    "payment": {
+      "type": "application",
+      "root": "apps/payment",
+      "entryFile": "main",
+      "sourceRoot": "apps/payment/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/payment/tsconfig.app.json"
+      }
+    },
+    "wallet": {
+      "type": "application",
+      "root": "apps/wallet",
+      "entryFile": "main",
+      "sourceRoot": "apps/wallet/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/wallet/tsconfig.app.json"
+      }
+    }
+  }
+}

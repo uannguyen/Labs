@@ -1,0 +1,47 @@
+# Hạ tầng dùng chung cho mọi project trong Lab.
+#   docker compose -f infra/docker-compose.yml up -d                     -> chỉ Postgres
+#   docker compose -f infra/docker-compose.yml --profile kafka up -d     -> thêm Kafka
+# Service chạy trên máy host (npm run ...), kết nối qua localhost.
+name: lab
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+      POSTGRES_DB: lab
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql] # từ PG18 mount ở đây, không phải .../data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "lab"]
+      interval: 5s
+
+  # KRaft 1 node, config mặc định của image: advertise localhost:9092.
+  # ponytail: chỉ client trên host kết nối được; container khác cần thêm listener nội bộ.
+  kafka:
+    image: apache/kafka:4.3.1
+    profiles: [kafka]
+    ports: ["9092:9092"]
+
+  redis:
+    image: redis:8.8-alpine
+    profiles: [redis]
+    ports: ["6379:6379"]
+
+  # API ở :8474. Proxy tạo qua API, listen trong dải 21000-21009, upstream trỏ về
+  # host.docker.internal:<port service>.
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    profiles: [toxiproxy]
+    ports: ["8474:8474", "21000-21009:21000-21009"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  # UI ở :16686, nhận OTLP ở :4317 (gRPC) và :4318 (HTTP).
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    profiles: [jaeger]
+    ports: ["16686:16686", "4317:4317", "4318:4318"]
+
+volumes:
+  pgdata:

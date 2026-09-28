@@ -1,11 +1,31 @@
-# Lab — mini-wallet
+# Lab — sân tập thực hành
 
-> **Một repo duy nhất, lớn dần.** Không tạo project mới cho mỗi topic.
+> **Một git repo, nhiều project con.** Mỗi thư mục con là một project độc lập để thử một
+> nhóm kiến thức. Hạ tầng dùng chung (Postgres, Kafka, Redis…) chạy bằng Docker ở `infra/`.
 >
-> Code sẽ nằm ở `Lab/mini-wallet/` như một git repo riêng. Thư mục `INTERVIEW/` không phải
-> git repo nên lồng repo con vào đây không vấn đề gì.
+> Bản thân `Lab/` là git repo (remote `github.com:uannguyen/Labs.git`). Thư mục `INTERVIEW/`
+> không phải git repo nên đặt repo ở đây không vướng gì.
 
-## Vì sao là bài toán ví, không phải bài toán khác
+## Cấu trúc
+
+```
+Lab/
+├── infra/docker-compose.yml   # postgres luôn bật; kafka, redis, toxiproxy, jaeger bật theo --profile
+├── mini-wallet/               # project chính: SQL (04), auth (02), queue (06)
+├── microservices/             # 01b: wallet, payment, partner, notification
+├── node-internals/            # 05: script rời, không cần app
+└── <topic>/                   # thêm khi có thứ cần thử
+```
+
+- Mỗi project tự chạy được, có `README.md` ngắn: thử kiến thức gì, chạy thế nào, thấy gì.
+- Project chỉ dùng chung **infra**, không dùng chung code. Cần code của project khác thì copy
+  sang (ví dụ `microservices/wallet` khởi đầu bằng bản copy của `mini-wallet`).
+- Mỗi project dùng database riêng trên cùng một Postgres (`CREATE DATABASE <project>`), không
+  cần mỗi project một container.
+- Chỉ tạo project mới khi có một câu hỏi cụ thể cần trả lời bằng thực nghiệm. Không tạo sẵn
+  thư mục rỗng.
+
+## Vì sao project chính là bài toán ví
 
 Tái dùng đúng bài toán của `wallet-management` PoC bạn **đã làm ở FV** (NestJS + Postgres +
 TypeORM, chuyển tiền giữa ví). Lý do:
@@ -23,7 +43,7 @@ TypeORM, chuyển tiền giữa ví). Lý do:
   seed giả. Nhờ vậy đưa lên GitHub công khai được, làm bằng chứng kỹ thuật cho CV.
 - **Xấu cũng được, chạy được là đủ.** Đây là lab, không phải portfolio showcase. Chủ nghĩa
   cầu toàn ở đây là kẻ thù.
-- **Mỗi topic thêm một lớp, không viết lại từ đầu.**
+- **Trong cùng một project, mỗi topic thêm một lớp, không viết lại từ đầu.**
 - Commit sau mỗi phiên, message ghi rõ phiên nào. Git log chính là bằng chứng tiến độ.
 
 ## Lộ trình — thêm dần theo topic
@@ -38,7 +58,7 @@ TypeORM, chuyển tiền giữa ví). Lý do:
 
 ### Từ `On-tap/05-nodejs-internals.md` — 3 phiên cuối tuần
 
-Thêm thư mục `internals/`, các script độc lập (không cần tích hợp vào app):
+Project `node-internals/`, các script độc lập (không cần tích hợp vào app):
 thứ tự event loop · `UV_THREADPOOL_SIZE` với crypto vs HTTP · endpoint blocking rồi sửa bằng
 stream · ghi file không chờ `drain` rồi sửa bằng `pipeline` · leak bằng `Map` global + heap
 snapshot · CPU-bound chuyển sang `worker_threads`.
@@ -57,12 +77,47 @@ Docker Kafka một broker. Publish event `transfer.completed`, hai consumer grou
 > Hai mục "tùy chọn" ở trên **không nằm trong định nghĩa XONG** của topic tương ứng.
 > Bỏ qua hoàn toàn cũng được.
 
+### Từ `On-tap/01b_microservices-bo-cau-hoi.md` — làm sau lab SQL phiên 3
+
+Lab này bám vào **lỗi và dữ liệu**, không bám vào cách chia service. Mỗi phiên đi theo 3 bước:
+tái hiện lỗi, sửa lỗi, rồi ghi lại một câu để nói khi phỏng vấn. Mini-wallet được tách thành
+4 service:
+
+- `wallet`: là mini-wallet hiện tại, sở hữu số dư, có debit/credit kèm idempotency key.
+- `payment`: orchestrator của saga, có DB riêng gồm `payments`, `outbox`, `saga_state`.
+- `partner`: giả lập đối tác, chỉnh bằng env để nó fail, chạy chậm hoặc timeout.
+- `notification`: consumer của event `payment.*`, có bảng `inbox` để dedupe.
+
+Infra lấy từ `infra/` với profile `kafka` và `toxiproxy`. Mỗi service có một database riêng
+trên Postgres chung (mô phỏng database-per-service). Code đặt ở `microservices/`, script tái
+hiện đặt ở `microservices/scripts/Lx-repro.sh`.
+
+| Phiên | Câu 01b | Tái hiện | Sửa |
+|---|---|---|---|
+| L1 ⭐ | #13 | Ghi DB xong thì `process.exit()` trước khi publish → event mất | Transactional outbox + relay polling `FOR UPDATE SKIP LOCKED` |
+| L2 ⭐ | #14, #9 | Relay publish xong crash trước khi đánh dấu → notification gửi 2 lần; client retry → trừ 2 lần | Inbox với unique `message_id` ghi cùng transaction; idempotency key trả response cũ |
+| L3 ⭐ | #12 | Partner fail sau khi đã debit ví | Saga orchestration + compensation (refund), đặt pivot ở cuối; kill orchestrator giữa chừng rồi resume từ `saga_state` |
+| L4 | #15 | Topic 3 partition không có key → event cùng ví đến sai thứ tự | Key = `walletId` + version trên event, consumer bỏ qua event cũ |
+| L5 | #8, #18 | Toxiproxy +5s vào partner, bắn tải bằng autocannon → socket và memory của payment phình lên | Timeout, retry backoff + jitter (chỉ với thao tác idempotent), circuit breaker (`opossum`) |
+| L6 | #10, #7 | Truy vết một request lỗi đi qua 3 service | OpenTelemetry + Jaeger; 1 endpoint API composition |
+
+**XONG khi** làm xong L1–L3, vì 3 phiên này phủ #12, #13, #14. L4–L6 là tùy chọn. Nếu dựng
+compose mất quá một buổi tối thì bỏ Toxiproxy và Jaeger trước. Nếu máy không đủ RAM cho Kafka
+thì thay bằng Redpanda (tương thích Kafka API). Làm xong mỗi phiên thì ghi 3–5 dòng vào
+`On-tap/01b` theo mẫu "Tôi đã thấy X khi Y, sửa bằng Z".
+
+Các câu #1–6, #11, #16, #17, #19–21 không cần lab, chỉ cần chuẩn bị để nói.
+
 ## Stack
 
 Postgres + TypeORM + NestJS — giống hệt `wallet-management` PoC. Không đổi stack để học công
 nghệ mới; mục tiêu là học **SQL và internals**, không phải học framework.
 
-Postgres chạy bằng Docker (`docker run` một dòng là đủ, không cần docker-compose).
+Stack trên áp dụng cho `mini-wallet` và `microservices`. Project thử nghiệm khác chọn stack
+nhẹ nhất đủ để thấy vấn đề, script Node thuần cũng được.
+
+Hạ tầng: `docker compose -f infra/docker-compose.yml up -d` bật Postgres. Cần thêm thì bật
+theo profile, ví dụ `--profile kafka`. Không cài gì trực tiếp lên máy.
 
 ## XONG cả lab khi
 
